@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strings"
 	"text/template"
 
 	"github.com/fzzy/radix/redis"
@@ -94,7 +95,25 @@ func createHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("record created! id: %s", key)
-	w.Write([]byte(fmt.Sprintf("http://%s/%s\n", r.Host, key)))
+
+	url := fmt.Sprintf("http://%s/%s\n", r.Host, key)
+	w.Write([]byte(url))
+	go postWebHook(url)
+}
+
+func postWebHook(text string) {
+	webhook := os.Getenv("WEBHOOK_URL")
+	if webhook == "" {
+		return
+	}
+
+	client := &http.Client{}
+	resp, _ := client.Post(
+		webhook,
+		"application/x-www-form-urlencoded",
+		strings.NewReader(text),
+	)
+	log.Printf("%+v", resp)
 }
 
 func postHandler(w http.ResponseWriter, r *http.Request) {
