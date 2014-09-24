@@ -1,1 +1,1 @@
-web: poster
+web: freesozai
