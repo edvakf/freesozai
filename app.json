@@ -1,0 +1,15 @@
+{
+  "name": "FreeSozai",
+  "description": "A simple to use text pastebin.",
+  "keywords": [
+    "productivity",
+    "golang"
+  ],
+  "repository": "https://github.com/edvakf/freesozai",
+  "env": {
+    "BUILDPACK_URL": "https://github.com/kr/heroku-buildpack-go"
+  },
+  "addons": [
+    "redistogo"
+  ]
+}
