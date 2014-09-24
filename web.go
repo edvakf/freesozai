@@ -1,7 +1,7 @@
 package main
 
 import (
-	"database/sql"
+	"crypto/md5"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -10,19 +10,15 @@ import (
 	"regexp"
 	"text/template"
 
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/fzzy/radix/redis"
 	"github.com/gorilla/mux"
 )
 
-var db *sql.DB
-
 func main() {
-	initDB()
-
 	r := mux.NewRouter()
 	r.HandleFunc("/", topHandler).Methods("GET")
 	r.HandleFunc("/", createHandler).Methods("POST")
-	r.HandleFunc("/{id:[0-9]+}", postHandler).Methods("GET")
+	r.HandleFunc("/{key:[0-9a-f]+}", postHandler).Methods("GET")
 	http.Handle("/", r)
 
 	err := http.ListenAndServe(":"+os.Getenv("PORT"), nil)
@@ -31,70 +27,88 @@ func main() {
 	}
 }
 
-func initDB() {
-	var err error
-	m := regexp.MustCompile("^mysql://(.+?):(.+?)@(.+?)/(.+?)\\?.*").FindStringSubmatch(os.Getenv("CLEARDB_DATABASE_URL"))
+func redisClient() (*redis.Client, error) {
+	m := regexp.MustCompile("^redis://redistogo:(.+?)@(.+?)/").FindStringSubmatch(os.Getenv("REDISTOGO_URL"))
 	log.Printf("%+v", m)
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s", m[1], m[2], m[3], 3306, m[4])
-	db, err = sql.Open("mysql", dsn)
-
-	err = db.Ping()
+	cli, err := redis.Dial("tcp", m[2])
 	if err != nil {
-		panic(err.Error())
+		return nil, err
 	}
-
-	_, err = db.Exec("CREATE TABLE IF NOT EXISTS posts (id INT(10) UNSIGNED NOT NULL AUTO_INCREMENT, text MEDIUMTEXT, PRIMARY KEY (id))")
+	_, err = cli.Cmd("AUTH", m[1]).Bool()
 	if err != nil {
-		panic(err.Error())
+		return nil, err
 	}
+	return cli, nil
 }
 
 func topHandler(w http.ResponseWriter, r *http.Request) {
-	var id int
-	err := db.QueryRow("SELECT id FROM posts ORDER BY id DESC LIMIT 1").Scan(&id)
+	cli, err := redisClient()
 	if err != nil {
-		if err == sql.ErrNoRows {
-			t := template.Must(template.New("html").Parse(`<!DOCTYPE html><h1>Welcome!</h1>`))
-			t.ExecuteTemplate(w, "html", nil)
-			return
-		} else {
-			serverError(w, err)
-			return
-		}
+		serverError(w, err)
+		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/%d", id), http.StatusFound)
+	defer cli.Close()
+	rep := cli.Cmd("RANDOMKEY")
+	if rep.Type == redis.NilReply {
+		log.Printf("empty database")
+		t := template.Must(template.New("html").Parse(`<!DOCTYPE html><h1>Welcome!</h1>`))
+		t.ExecuteTemplate(w, "html", nil)
+		return
+	}
+	key, err := rep.Str()
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	http.Redirect(w, r, fmt.Sprintf("/%s", key), http.StatusFound)
+}
+
+func md5hash(text []byte) string {
+	h := md5.New()
+	h.Write(text)
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 func createHandler(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body)
-	log.Printf("%s", body)
 	if err != nil {
 		serverError(w, err)
 		return
 	}
-	res, err := db.Exec("INSERT INTO posts (text) VALUES (?)", string(body))
+	cli, err := redisClient()
 	if err != nil {
 		serverError(w, err)
 		return
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
+	defer cli.Close()
+	key := md5hash(body)
+	cli.Cmd("MULTI")
+	cli.Cmd("SET", key, body)
+	cli.Cmd("EXPIRE", key, 60*60*24*7)
+	rep := cli.Cmd("EXEC")
+	log.Printf("key: %s %s", key, rep.String())
+	if rep.Err != nil {
 		serverError(w, err)
 		return
 	}
-	log.Printf("record created! id: %d", id)
-	w.Write([]byte(fmt.Sprintf("http://%s/%d\n", r.Host, id)))
+	log.Printf("record created! id: %s", key)
+	w.Write([]byte(fmt.Sprintf("http://%s/%s\n", r.Host, key)))
 }
 
 func postHandler(w http.ResponseWriter, r *http.Request) {
-	var text string
-	vars := mux.Vars(r)
-	err := db.QueryRow("SELECT text FROM posts WHERE id = ?", vars["id"]).Scan(&text)
+	cli, err := redisClient()
 	if err != nil {
 		serverError(w, err)
 		return
 	}
-	log.Printf("found post")
+	defer cli.Close()
+	vars := mux.Vars(r)
+	text, err := cli.Cmd("GET", vars["key"]).Str()
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	log.Printf("found post for key %s", vars["key"])
 	t := template.Must(template.New("html").Parse(`<!DOCTYPE html><pre>{{.text}}</pre>`))
 	t.ExecuteTemplate(w, "html", map[string]string{
 		"text": text,
