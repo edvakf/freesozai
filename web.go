@@ -81,7 +81,7 @@ func createHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer cli.Close()
-	key := md5hash(body)
+	key := md5hash(body)[:7]
 	cli.Cmd("MULTI")
 	cli.Cmd("SET", key, body)
 	cli.Cmd("EXPIRE", key, 60*60*24*7)
