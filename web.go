@@ -15,9 +15,11 @@ import (
 )
 
 func main() {
+	log.Printf("Your POST endpoint is /%s", os.Getenv("ENDPOINT"))
+
 	r := mux.NewRouter()
 	r.HandleFunc("/", topHandler).Methods("GET")
-	r.HandleFunc("/", createHandler).Methods("POST")
+	r.HandleFunc("/"+os.Getenv("ENDPOINT"), createHandler).Methods("POST")
 	r.HandleFunc("/{key:[0-9a-f]+}", postHandler).Methods("GET")
 	http.Handle("/", r)
 
