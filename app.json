@@ -7,7 +7,15 @@
   ],
   "repository": "https://github.com/edvakf/freesozai",
   "env": {
-    "BUILDPACK_URL": "https://github.com/kr/heroku-buildpack-go"
+    "BUILDPACK_URL": "https://github.com/kr/heroku-buildpack-go",
+    "ENDPOINT": {
+      "description": "secret string used as endpoint (eg. if set as \"foo\", then the post URL would be http://example.herokuapp.com/foo)",
+      "required": false
+    },
+    "WEBHOOK_URL": {
+      "description": "URL to notify when a new post is created (eg. your slackbot URL)",
+      "required": false
+    }
   },
   "addons": [
     "redistogo"
